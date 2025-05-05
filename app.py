@@ -3,14 +3,31 @@ from flask import Flask, request
 from flask_restful import Api, Resource
 from marshmallow import Schema, fields
 from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, jwt_required, create_access_token
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///data.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-db = SQLAlchemy(app)
+app.config["JWT_SECRET_KEY"] = "jose"
 api = Api(app)
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
 
 #db models
+class UserModel(db.Model):
+    __tablename__ = "users"
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(128), nullable=False)
+
+    def set_password(self, password):
+        self.password = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password, password)
+
 class ItemModel(db.Model):
     __tablename__ = "items"
 
@@ -46,6 +63,11 @@ class TagModel(db.Model):
     items = db.relationship("ItemModel", back_populates="tags", secondary="items_tags")
 
 #schemes
+class UserSchema(Schema):
+    id = fields.Int(dump_only=True)
+    username = fields.Str(required=True)
+    password = fields.Str(required=True)
+
 class PlainTagSchema(Schema):
     id = fields.Int(dump_only=True)
     name = fields.Str()
@@ -97,13 +119,33 @@ items_tags = db.Table(
 )
 
 #resources
+class UserRegister(Resource):
+    def post(self):
+        data = request.get_json()
+        user = UserModel(username=data["username"])
+        user.set_password(data["password"])
+        db.session.add(user)
+        db.session.commit()
+        return {"message": "User registered successfully"}, 200
+
+class UserLogin(Resource):
+    def post(self):
+        data = request.get_json()
+        user = UserModel.query.filter_by(username=data["username"]).first()
+        if user and user.check_password(data["password"]):
+            access_token = create_access_token(identity=str(user.id))
+            return {"access_token": access_token}, 200
+        return {"message": "Invalid credentials"}, 401
+
 class Item(Resource):
+    @jwt_required()
     def get(self, name):
         item = ItemModel.query.filter_by(name=name).first() # повертає перший товар, чиє name збігається
         if item:
             return ItemSchema().dump(item)
         return {"message": "Item not found"}, 404
 
+    @jwt_required()
     def post(self):
         data = request.get_json() # отримує дані з запиту
         item = ItemModel(**data)
@@ -111,6 +153,7 @@ class Item(Resource):
         db.session.commit() # зберігаємо
         return ItemSchema().dump(item)
 
+    @jwt_required()
     def delete(self, name):
         item = ItemModel.query.filter_by(name=name).first()
         if item:
@@ -119,6 +162,7 @@ class Item(Resource):
         return {"message": "Item deleted"}
 
 class Store(Resource):
+    @jwt_required()
     def post(self):
         data = request.get_json()
         store = StoreModel(**data)
@@ -126,6 +170,7 @@ class Store(Resource):
         db.session.commit()
         return StoreSchema().dump(store)
 
+    @jwt_required()
     def get(self, name):
         store = StoreModel.query.filter_by(name=name).first()
         if store:
@@ -133,6 +178,7 @@ class Store(Resource):
         return {"message": "Store not found"}, 404
 
 class Tag(Resource):
+    @jwt_required()
     def post(self):
         data = request.get_json()
         tag = TagModel(**data)
@@ -140,12 +186,14 @@ class Tag(Resource):
         db.session.commit()
         return TagSchema().dump(tag)
 
+    @jwt_required()
     def get(self, name):
         tag = TagModel.query.filter_by(name=name).first()
         if tag:
             return TagSchema().dump(tag)
         return {"message": "Tag not found"}, 404
     #delete tag completely
+    @jwt_required()
     def delete(self, tag_id):
         tag = TagModel.query.get(tag_id)
 
@@ -156,6 +204,7 @@ class Tag(Resource):
 
 
 class LinkTagToItem(Resource):
+    @jwt_required()
     def post(self, item_id, tag_id):
         item = ItemModel.query.get(item_id)
         tag = TagModel.query.get(tag_id)
@@ -169,6 +218,7 @@ class LinkTagToItem(Resource):
         return TagAndItemSchema().dump({"message": "Tag added to Item", "item": item, "tag": tag})
 
     # to unlink tag from item
+    @jwt_required()
     def delete(self, item_id, tag_id):
         item = ItemModel.query.get(item_id)
         tag = TagModel.query.get(tag_id)
@@ -184,7 +234,8 @@ class LinkTagToItem(Resource):
 
         return {"message": "Tag not attached to item."}, 400
 
-
+api.add_resource(UserRegister, "/register")
+api.add_resource(UserLogin, "/login")
 api.add_resource(Item, '/item/<string:name>', '/item')
 api.add_resource(Store, "/store/<string:name>", "/store")
 api.add_resource(Tag, "/tag/<string:name>", "/tag")

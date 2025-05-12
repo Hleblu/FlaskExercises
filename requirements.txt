@@ -1,7 +1,7 @@
-Flask
-Flask-RESTful
-Flask-SQLAlchemy
-Flask-JWT-Extended
+flask
+flask-restful
 marshmallow
+flask-sqlalchemy
+flask-jwt-extended
+werkzeug
 gunicorn
-Werkzeug

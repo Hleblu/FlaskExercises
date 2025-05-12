@@ -14,9 +14,6 @@ api = Api(app)
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
 
-with app.app_context():
-    db.create_all()
-
 #db models
 class UserModel(db.Model):
     __tablename__ = "users"
@@ -243,6 +240,9 @@ api.add_resource(Item, '/item/<string:name>', '/item')
 api.add_resource(Store, "/store/<string:name>", "/store")
 api.add_resource(Tag, "/tag/<string:name>", "/tag")
 api.add_resource(LinkTagToItem, "/item/<int:item_id>/tag/<int:tag_id>")
+
+with app.app_context():
+    db.create_all()
 
 if __name__ == "__main__":
     app.run(debug=True)
